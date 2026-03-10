@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>今日食咩？</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+HK:wght@400;700;900&family=Bebas+Neue&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --bg: #0f0e0c; --surface: #1a1814; --card: #211f1b; --border: #333028;
+    --orange: #ff6b1a; --yellow: #ffc94a; --red: #ff3d3d; --green: #3dff9a;
+    --text: #f5f0e8; --muted: #7a7060;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Noto Sans HK', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; overflow-x: hidden; }
+  body::before { content: ''; position: fixed; inset: 0;
+    background: radial-gradient(ellipse at 20% 20%, rgba(255,107,26,0.06) 0%, transparent 60%),
+                radial-gradient(ellipse at 80% 80%, rgba(255,201,74,0.04) 0%, transparent 60%);
+    pointer-events: none; z-index: 0; }
+  .app { position: relative; z-index: 1; max-width: 600px; margin: 0 auto; padding: 20px 16px 80px; }
+  #loadingScreen { position: fixed; inset: 0; background: var(--bg); z-index: 100;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
+  .loading-logo { font-family: 'Bebas Neue', sans-serif; font-size: 48px; letter-spacing: 4px;
+    background: linear-gradient(135deg, var(--orange), var(--yellow));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .loading-spin { width: 36px; height: 36px; border: 3px solid var(--border);
+    border-top-color: var(--orange); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  .loading-msg { color: var(--muted); font-size: 13px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .sync-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    background: var(--green); margin-right: 6px; animation: pulse 2s ease-in-out infinite; }
+  .sync-dot.offline { background: var(--red); animation: none; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  header { text-align: center; padding: 32px 0 24px; }
+  .logo { font-family: 'Bebas Neue', sans-serif; font-size: 64px; letter-spacing: 4px; line-height: 1;
+    background: linear-gradient(135deg, var(--orange), var(--yellow));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .subtitle { color: var(--muted); font-size: 11px; margin-top: 4px; letter-spacing: 2px; }
+  .sync-status { font-size: 11px; color: var(--muted); margin-top: 6px; }
+  .tabs { display: flex; gap: 4px; background: var(--surface); border-radius: 12px; padding: 4px; margin-bottom: 20px; }
+  .tab { flex: 1; padding: 8px 0; text-align: center; border-radius: 8px; cursor: pointer;
+    font-size: 13px; font-weight: 700; color: var(--muted); transition: all .2s; border: none; background: none; }
+  .tab.active { background: var(--card); color: var(--text); }
+  .panel { display: none; } .panel.active { display: block; }
+  .section-label { font-size: 11px; font-weight: 700; letter-spacing: 2px; color: var(--muted); text-transform: uppercase; margin-bottom: 10px; }
+  .people-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+  .person-chip { display: flex; align-items: center; gap: 6px; padding: 6px 14px;
+    border-radius: 999px; cursor: pointer; border: 1.5px solid var(--border);
+    background: var(--card); font-size: 13px; font-weight: 700; transition: all .15s; user-select: none; }
+  .person-chip.on { border-color: var(--orange); background: rgba(255,107,26,0.15); color: var(--orange); }
+  .person-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+  .person-chip.on .dot { background: var(--orange); }
+  .excl-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 24px; }
+  .excl-chip { padding: 4px 12px; border-radius: 999px; border: 1.5px solid var(--border);
+    background: var(--card); font-size: 12px; cursor: pointer; transition: all .15s; user-select: none; }
+  .excl-chip.excluded { border-color: var(--red); background: rgba(255,61,61,0.15); color: var(--red); text-decoration: line-through; }
+  .avail-bar { display: flex; align-items: center; justify-content: space-between;
+    background: var(--surface); border-radius: 10px; padding: 10px 14px; margin-bottom: 20px; }
+  .avail-count { font-size: 13px; color: var(--muted); }
+  .avail-count strong { color: var(--yellow); font-size: 18px; margin-right: 4px; }
+  .reset-btn { font-size: 11px; color: var(--muted); cursor: pointer; padding: 4px 8px;
+    border-radius: 6px; border: 1px solid var(--border); background: none; transition: all .15s; }
+  .reset-btn:hover { color: var(--text); border-color: var(--muted); }
+  .draw-wrap { text-align: center; margin: 8px 0 28px; }
+  .draw-btn { width: 180px; height: 180px; border-radius: 50%; border: none; cursor: pointer;
+    position: relative; overflow: hidden;
+    background: conic-gradient(from 0deg, var(--orange), var(--yellow), var(--orange));
+    animation: spin-idle 8s linear infinite;
+    box-shadow: 0 0 40px rgba(255,107,26,0.4), inset 0 0 30px rgba(0,0,0,0.3); transition: transform .1s; }
+  .draw-btn:hover { transform: scale(1.05); }
+  .draw-btn:active { transform: scale(0.97); }
+  .draw-btn::before { content: ''; position: absolute; inset: 8px; border-radius: 50%; background: var(--bg); z-index: 1; }
+  .draw-btn-inner { position: relative; z-index: 2; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; height: 100%; gap: 4px; }
+  .draw-icon { font-size: 36px; line-height: 1; }
+  .draw-label { font-family: 'Bebas Neue', sans-serif; font-size: 22px; letter-spacing: 3px;
+    background: linear-gradient(135deg, var(--orange), var(--yellow));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  @keyframes spin-idle { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+  .draw-btn.spinning { animation: spin-idle 0.15s linear infinite; }
+  .result-box { background: var(--card); border: 1.5px solid var(--border); border-radius: 16px;
+    padding: 24px; text-align: center; min-height: 90px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; transition: all .3s; }
+  .result-box.revealed { border-color: var(--orange); box-shadow: 0 0 24px rgba(255,107,26,0.2); }
+  .result-placeholder { color: var(--muted); font-size: 14px; }
+  .result-name { font-family: 'Bebas Neue', sans-serif; font-size: 52px; letter-spacing: 4px;
+    background: linear-gradient(135deg, var(--orange), var(--yellow));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; line-height: 1; }
+  .result-sub { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .result-again { margin-top: 12px; font-size: 12px; color: var(--muted); cursor: pointer;
+    padding: 4px 12px; border-radius: 6px; border: 1px solid var(--border); background: none; transition: all .15s; }
+  .result-again:hover { color: var(--text); border-color: var(--muted); }
+  .settings-section { background: var(--card); border-radius: 14px; padding: 18px; margin-bottom: 16px; }
+  .settings-section h3 { font-size: 15px; font-weight: 900; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+  .add-row { display: flex; gap: 8px; margin-bottom: 14px; }
+  .add-row input { flex: 1; background: var(--surface); border: 1.5px solid var(--border); border-radius: 8px;
+    padding: 8px 12px; color: var(--text); font-size: 14px; font-family: inherit; outline: none; transition: border-color .15s; }
+  .add-row input:focus { border-color: var(--orange); }
+  .add-row input::placeholder { color: var(--muted); }
+  .add-row button { padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer;
+    background: var(--orange); color: #fff; font-size: 13px; font-weight: 700;
+    font-family: inherit; transition: opacity .15s; white-space: nowrap; }
+  .add-row button:hover { opacity: 0.85; }
+  .item-list { display: flex; flex-direction: column; gap: 6px; }
+  .item-row { display: flex; align-items: center; justify-content: space-between;
+    background: var(--surface); border-radius: 8px; padding: 8px 12px; }
+  .item-name { font-size: 14px; font-weight: 700; }
+  .item-actions { display: flex; gap: 6px; align-items: center; }
+  .del-btn { background: none; border: 1px solid var(--border); border-radius: 6px;
+    color: var(--muted); font-size: 12px; cursor: pointer; padding: 3px 8px; transition: all .15s; }
+  .del-btn:hover { border-color: var(--red); color: var(--red); }
+  .excl-editor { background: var(--bg); border-radius: 10px; padding: 12px; margin-top: 6px; }
+  .excl-editor-title { font-size: 11px; color: var(--muted); margin-bottom: 8px; font-weight: 700; letter-spacing: 1px; }
+  .excl-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .excl-tag { padding: 4px 10px; border-radius: 999px; font-size: 12px; cursor: pointer;
+    border: 1.5px solid var(--border); background: var(--card); transition: all .15s; user-select: none; }
+  .excl-tag.banned { border-color: var(--red); background: rgba(255,61,61,0.15); color: var(--red); }
+  .expand-btn { background: none; border: none; color: var(--muted); font-size: 11px;
+    cursor: pointer; padding: 2px 6px; border-radius: 4px; transition: color .15s; }
+  .expand-btn:hover { color: var(--text); }
+  .empty-hint { color: var(--muted); font-size: 13px; text-align: center; padding: 16px 0; }
+  .no-avail { color: var(--red); font-size: 13px; text-align: center; padding: 8px 0; }
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px);
+    background: var(--green); color: #0f0e0c; padding: 10px 20px; border-radius: 999px;
+    font-size: 13px; font-weight: 700; z-index: 999; transition: transform .3s ease; pointer-events: none; }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+  @media (max-width: 400px) { .logo{font-size:48px} .draw-btn{width:150px;height:150px} .result-name{font-size:40px} }
+</style>
+</head>
+<body>
+<div id="loadingScreen">
+  <div class="loading-logo">今日食咩？</div>
+  <div class="loading-spin"></div>
+  <div class="loading-msg" id="loadingMsg">連接中...</div>
+</div>
+<div class="app">
+  <header>
+    <div class="logo">今日食咩？</div>
+    <div class="subtitle">WHAT TO EAT TODAY</div>
+    <div class="sync-status"><span class="sync-dot" id="syncDot"></span><span id="syncText">已連線</span></div>
+  </header>
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('main',this)">🎰 抽籤</button>
+    <button class="tab" onclick="switchTab('settings',this)">⚙️ 設定</button>
+  </div>
+  <div class="panel active" id="panel-main">
+    <div class="section-label">今日係邊幾個人食？</div>
+    <div class="people-row" id="peopleRow"></div>
+    <div class="section-label">今日唔考慮（直接排除）</div>
+    <div class="excl-row" id="exclRow"></div>
+    <div class="avail-bar">
+      <div class="avail-count"><strong id="availCount">0</strong>間可以揀</div>
+      <button class="reset-btn" onclick="resetToday()">重設今日</button>
+    </div>
+    <div class="draw-wrap">
+      <button class="draw-btn" id="drawBtn" onclick="draw()">
+        <div class="draw-btn-inner"><div class="draw-icon">🎲</div><div class="draw-label">SPIN</div></div>
+      </button>
+    </div>
+    <div class="result-box" id="resultBox"><div class="result-placeholder">撳個掣就知食咩啦 👆</div></div>
+  </div>
+  <div class="panel" id="panel-settings">
+    <div class="settings-section">
+      <h3><span>🍜</span> 餐廳 / 外賣選項</h3>
+      <div class="add-row">
+        <input type="text" id="newRestInput" placeholder="加新餐廳..." onkeydown="if(event.key==='Enter')addRestaurant()">
+        <button onclick="addRestaurant()">加入</button>
+      </div>
+      <div class="item-list" id="restList"></div>
+    </div>
+    <div class="settings-section">
+      <h3><span>👥</span> 人員管理</h3>
+      <div class="add-row">
+        <input type="text" id="newPersonInput" placeholder="加新成員..." onkeydown="if(event.key==='Enter')addPerson()">
+        <button onclick="addPerson()">加入</button>
+      </div>
+      <div class="item-list" id="personList"></div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const SUPABASE_URL = 'https://tlmkopdfrhgndkjqrbhv.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_a0cbx2oNEfR3uiFVG7vvIw_AjbVaYZx';
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+let restaurants = [], people = [], exclusions = [];
+let today = { activePeople: {}, directExclude: {} };
+try { const t = localStorage.getItem('jssm_today_v3'); if (t) today = JSON.parse(t); } catch(e) {}
+function saveToday() { localStorage.setItem('jssm_today_v3', JSON.stringify(today)); }
+
+async function loadAll() {
+  document.getElementById('loadingMsg').textContent = '載入資料中...';
+  try {
+    const [r, p, e] = await Promise.all([
+      sb.from('restaurants').select('*').order('name'),
+      sb.from('people').select('*').order('name'),
+      sb.from('person_exclusions').select('*'),
+    ]);
+    restaurants = r.data || []; people = p.data || []; exclusions = e.data || [];
+    document.getElementById('loadingScreen').style.display = 'none';
+    render(); setupRealtime();
+  } catch(err) {
+    document.getElementById('loadingMsg').textContent = '連接失敗，請重新整理';
+  }
+}
+
+function setupRealtime() {
+  sb.channel('changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurants' }, loadAll)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'people' }, loadAll)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'person_exclusions' }, loadAll)
+    .subscribe(status => {
+      const online = status === 'SUBSCRIBED';
+      document.getElementById('syncDot').className = 'sync-dot' + (online ? '' : ' offline');
+      document.getElementById('syncText').textContent = online ? '已連線 · 資料即時同步' : '重新連接中...';
+    });
+}
+
+function getExcludedByPeople() {
+  const excl = new Set();
+  Object.keys(today.activePeople || {}).forEach(pid => {
+    if (!today.activePeople[pid]) return;
+    exclusions.filter(e => e.person_id === pid).forEach(e => excl.add(e.restaurant_id));
+  });
+  return excl;
+}
+
+function getAvailableRestaurants() {
+  const exclByPeople = getExcludedByPeople();
+  return restaurants.filter(r => !exclByPeople.has(r.id) && !(today.directExclude || {})[r.id]);
+}
+
+function renderMain() {
+  document.getElementById('peopleRow').innerHTML = people.length === 0
+    ? '<div style="color:var(--muted);font-size:13px">未有成員，請到「設定」加入</div>'
+    : people.map(p => {
+        const on = (today.activePeople || {})[p.id];
+        return `<div class="person-chip ${on?'on':''}" onclick="togglePerson('${p.id}')"><div class="dot"></div>${p.name}</div>`;
+      }).join('');
+  document.getElementById('exclRow').innerHTML = restaurants.length === 0
+    ? '<div style="color:var(--muted);font-size:13px">未有餐廳</div>'
+    : restaurants.map(r => {
+        const excl = (today.directExclude || {})[r.id];
+        return `<div class="excl-chip ${excl?'excluded':''}" onclick="toggleDirectExcl('${r.id}')">${r.name}</div>`;
+      }).join('');
+  document.getElementById('availCount').textContent = getAvailableRestaurants().length;
+}
+
+let expandedPerson = null;
+
+function renderSettings() {
+  document.getElementById('restList').innerHTML = restaurants.length === 0
+    ? '<div class="empty-hint">未有餐廳，加幾間先！</div>'
+    : restaurants.map(r =>
+        `<div class="item-row"><div class="item-name">${r.name}</div>
+         <div class="item-actions"><button class="del-btn" onclick="deleteRestaurant('${r.id}')">刪除</button></div></div>`
+      ).join('');
+  document.getElementById('personList').innerHTML = people.length === 0
+    ? '<div class="empty-hint">未有成員，加幾個先！</div>'
+    : people.map(p => {
+        const expanded = expandedPerson === p.id;
+        const bannedCount = exclusions.filter(e => e.person_id === p.id).length;
+        return `<div>
+          <div class="item-row">
+            <div class="item-name">${p.name}${bannedCount > 0 ? ` <span style="color:var(--red);font-size:12px">(唔食 ${bannedCount} 間)</span>` : ''}</div>
+            <div class="item-actions">
+              <button class="expand-btn" onclick="toggleExpand('${p.id}')">${expanded ? '收起 ▲' : '唔食設定 ▼'}</button>
+              <button class="del-btn" onclick="deletePerson('${p.id}')">刪除</button>
+            </div>
+          </div>
+          ${expanded ? renderPersonExcl(p.id) : ''}
+        </div>`;
+      }).join('');
+}
+
+function renderPersonExcl(pid) {
+  if (restaurants.length === 0) return `<div class="excl-editor"><div style="color:var(--muted);font-size:12px">未有餐廳</div></div>`;
+  return `<div class="excl-editor">
+    <div class="excl-editor-title">點擊標記「唔食」嘅餐廳</div>
+    <div class="excl-tags">${restaurants.map(r => {
+      const banned = exclusions.some(e => e.person_id === pid && e.restaurant_id === r.id);
+      return `<div class="excl-tag ${banned?'banned':''}" onclick="togglePersonExcl('${pid}','${r.id}')">${r.name}</div>`;
+    }).join('')}</div></div>`;
+}
+
+function render() { renderMain(); renderSettings(); }
+
+function togglePerson(pid) {
+  if (!today.activePeople) today.activePeople = {};
+  today.activePeople[pid] = !today.activePeople[pid];
+  saveToday(); renderMain();
+}
+function toggleDirectExcl(rid) {
+  if (!today.directExclude) today.directExclude = {};
+  today.directExclude[rid] = !today.directExclude[rid];
+  saveToday(); renderMain();
+}
+function resetToday() {
+  today = { activePeople: {}, directExclude: {} };
+  document.getElementById('resultBox').className = 'result-box';
+  document.getElementById('resultBox').innerHTML = '<div class="result-placeholder">撳個掣就知食咩啦 👆</div>';
+  saveToday(); renderMain();
+}
+async function addRestaurant() {
+  const inp = document.getElementById('newRestInput');
+  const name = inp.value.trim();
+  if (!name) return;
+  if (restaurants.find(r => r.name === name)) { showToast('已經有呢間啦！'); return; }
+  await sb.from('restaurants').insert({ name });
+  inp.value = ''; showToast(`已加入「${name}」✓`);
+}
+async function deleteRestaurant(id) {
+  await sb.from('restaurants').delete().eq('id', id);
+  if (today.directExclude) delete today.directExclude[id]; saveToday();
+}
+async function addPerson() {
+  const inp = document.getElementById('newPersonInput');
+  const name = inp.value.trim();
+  if (!name) return;
+  if (people.find(p => p.name === name)) { showToast('已經有呢個人啦！'); return; }
+  await sb.from('people').insert({ name });
+  inp.value = ''; showToast(`已加入「${name}」✓`);
+}
+async function deletePerson(id) {
+  await sb.from('people').delete().eq('id', id);
+  if (today.activePeople) delete today.activePeople[id];
+  if (expandedPerson === id) expandedPerson = null; saveToday();
+}
+function toggleExpand(pid) { expandedPerson = expandedPerson === pid ? null : pid; renderSettings(); }
+async function togglePersonExcl(pid, rid) {
+  const exists = exclusions.some(e => e.person_id === pid && e.restaurant_id === rid);
+  if (exists) await sb.from('person_exclusions').delete().eq('person_id', pid).eq('restaurant_id', rid);
+  else await sb.from('person_exclusions').insert({ person_id: pid, restaurant_id: rid });
+}
+
+let isDrawing = false;
+function draw() {
+  if (isDrawing) return;
+  const avail = getAvailableRestaurants();
+  if (avail.length === 0) {
+    const rb = document.getElementById('resultBox');
+    rb.className = 'result-box';
+    rb.innerHTML = '<div class="no-avail">😅 無嘢可以揀！試下減少排除嘅餐廳</div>'; return;
+  }
+  isDrawing = true;
+  document.getElementById('drawBtn').classList.add('spinning');
+  let count = 0; const total = 20 + Math.floor(Math.random() * 15);
+  const rb = document.getElementById('resultBox'); rb.className = 'result-box';
+  const interval = setInterval(() => {
+    const r = avail[Math.floor(Math.random() * avail.length)];
+    rb.innerHTML = `<div class="result-name">${r.name}</div>`;
+    count++;
+    if (count >= total) {
+      clearInterval(interval);
+      document.getElementById('drawBtn').classList.remove('spinning');
+      isDrawing = false;
+      const final = avail[Math.floor(Math.random() * avail.length)];
+      rb.className = 'result-box revealed';
+      rb.innerHTML = `<div style="font-size:12px;color:var(--muted);margin-bottom:4px;letter-spacing:2px">今日就係</div>
+        <div class="result-name">${final.name}</div>
+        <div class="result-sub">🍽️ 食喇！</div>
+        <button class="result-again" onclick="draw()">唔鍾意？再抽一次</button>`;
+    }
+  }, 80);
+}
+
+function switchTab(tab, el) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById(`panel-${tab}`).classList.add('active'); el.classList.add('active');
+}
+
+let toastTimer;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+loadAll();
+</script>
+</body>
+</html>
