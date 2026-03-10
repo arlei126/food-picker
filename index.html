@@ -190,27 +190,46 @@ let today = { activePeople: {}, directExclude: {} };
 try { const t = localStorage.getItem('jssm_today_v3'); if (t) today = JSON.parse(t); } catch(e) {}
 function saveToday() { localStorage.setItem('jssm_today_v3', JSON.stringify(today)); }
 
+// ── 分開 fetch，唔會reset loading screen ──
+async function fetchRestaurants() {
+  const { data } = await sb.from('restaurants').select('*').order('name');
+  restaurants = data || [];
+}
+async function fetchPeople() {
+  const { data } = await sb.from('people').select('*').order('name');
+  people = data || [];
+}
+async function fetchExclusions() {
+  const { data } = await sb.from('person_exclusions').select('*');
+  exclusions = data || [];
+}
+
 async function loadAll() {
   document.getElementById('loadingMsg').textContent = '載入資料中...';
   try {
-    const [r, p, e] = await Promise.all([
-      sb.from('restaurants').select('*').order('name'),
-      sb.from('people').select('*').order('name'),
-      sb.from('person_exclusions').select('*'),
-    ]);
-    restaurants = r.data || []; people = p.data || []; exclusions = e.data || [];
+    await Promise.all([fetchRestaurants(), fetchPeople(), fetchExclusions()]);
     document.getElementById('loadingScreen').style.display = 'none';
-    render(); setupRealtime();
+    render();
+    setupRealtime();
   } catch(err) {
     document.getElementById('loadingMsg').textContent = '連接失敗，請重新整理';
   }
 }
 
 function setupRealtime() {
-  sb.channel('changes')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurants' }, loadAll)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'people' }, loadAll)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'person_exclusions' }, loadAll)
+  sb.channel('db-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'restaurants' }, async () => {
+      await fetchRestaurants();
+      render();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'people' }, async () => {
+      await fetchPeople();
+      render();
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'person_exclusions' }, async () => {
+      await fetchExclusions();
+      render();
+    })
     .subscribe(status => {
       const online = status === 'SUBSCRIBED';
       document.getElementById('syncDot').className = 'sync-dot' + (online ? '' : ' offline');
@@ -226,7 +245,6 @@ function getExcludedByPeople() {
   });
   return excl;
 }
-
 function getAvailableRestaurants() {
   const exclByPeople = getExcludedByPeople();
   return restaurants.filter(r => !exclByPeople.has(r.id) && !(today.directExclude || {})[r.id]);
@@ -249,7 +267,6 @@ function renderMain() {
 }
 
 let expandedPerson = null;
-
 function renderSettings() {
   document.getElementById('restList').innerHTML = restaurants.length === 0
     ? '<div class="empty-hint">未有餐廳，加幾間先！</div>'
@@ -274,7 +291,6 @@ function renderSettings() {
         </div>`;
       }).join('');
 }
-
 function renderPersonExcl(pid) {
   if (restaurants.length === 0) return `<div class="excl-editor"><div style="color:var(--muted);font-size:12px">未有餐廳</div></div>`;
   return `<div class="excl-editor">
@@ -284,7 +300,6 @@ function renderPersonExcl(pid) {
       return `<div class="excl-tag ${banned?'banned':''}" onclick="togglePersonExcl('${pid}','${r.id}')">${r.name}</div>`;
     }).join('')}</div></div>`;
 }
-
 function render() { renderMain(); renderSettings(); }
 
 function togglePerson(pid) {
@@ -308,8 +323,9 @@ async function addRestaurant() {
   const name = inp.value.trim();
   if (!name) return;
   if (restaurants.find(r => r.name === name)) { showToast('已經有呢間啦！'); return; }
+  inp.value = '';
   await sb.from('restaurants').insert({ name });
-  inp.value = ''; showToast(`已加入「${name}」✓`);
+  showToast(`已加入「${name}」✓`);
 }
 async function deleteRestaurant(id) {
   await sb.from('restaurants').delete().eq('id', id);
@@ -320,8 +336,9 @@ async function addPerson() {
   const name = inp.value.trim();
   if (!name) return;
   if (people.find(p => p.name === name)) { showToast('已經有呢個人啦！'); return; }
+  inp.value = '';
   await sb.from('people').insert({ name });
-  inp.value = ''; showToast(`已加入「${name}」✓`);
+  showToast(`已加入「${name}」✓`);
 }
 async function deletePerson(id) {
   await sb.from('people').delete().eq('id', id);
@@ -365,20 +382,17 @@ function draw() {
     }
   }, 80);
 }
-
 function switchTab(tab, el) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.getElementById(`panel-${tab}`).classList.add('active'); el.classList.add('active');
 }
-
 let toastTimer;
 function showToast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg; t.classList.add('show');
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
 }
-
 loadAll();
 </script>
 </body>
